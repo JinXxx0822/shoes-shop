@@ -50,7 +50,16 @@ $statusText = $onSale
         <h1><?php echo htmlspecialchars($product['name']); ?></h1>
         <p class="detail-style">款式：<?php echo htmlspecialchars($product['style']); ?></p>
         <p class="detail-price">¥<?php echo number_format($product['price'], 2); ?></p>
-        <p class="detail-stock">库存：<?php echo (int)$product['stock']; ?> 双</p>
+        <?php
+            $stock = (int)$product['stock'];
+            if ($stock <= 0) {
+                echo '<p class="detail-stock out">已售罄</p>';
+            } elseif ($stock <= 5) {
+                echo '<p class="detail-stock low">仅剩 ' . $stock . ' 双</p>';
+            } else {
+                echo '<p class="detail-stock">库存：' . $stock . ' 双</p>';
+            }
+        ?>
 
         <div class="detail-desc">
             <h3>商品介绍</h3>
@@ -63,7 +72,15 @@ $statusText = $onSale
         </p>
 
         <?php if ($onSale): ?>
-            <p><a class="btn" href="index.php">← 返回列表继续选购</a></p>
+            <?php if ($stock > 0): ?>
+                <p class="detail-actions">
+                    <a class="btn-add" href="cart.php?action=add&id=<?php echo (int)$product['id']; ?>">加入购物车</a>
+                    <a class="btn" href="index.php">← 返回列表</a>
+                </p>
+            <?php else: ?>
+                <p class="warn">该商品已售罄。</p>
+                <p><a class="btn" href="index.php">← 返回列表</a></p>
+            <?php endif; ?>
         <?php else: ?>
             <p class="warn">该批次当前不在上架时间段内，商品不可购买。</p>
             <p><a class="btn" href="index.php">← 返回列表</a></p>

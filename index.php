@@ -4,7 +4,9 @@
  * 功能：
  *   1) 展示所有批次及各自的上架状态（进行中 / 已结束 / 未开始）
  *   2) 仅展示「当前时间位于批次上架时间段内」的商品（分批、分时段上架）
- *   3) 支持按名称/款式关键词搜索，并分页展示（优化项）
+ *   3) 支持按名称/款式关键词搜索，并分页展示
+ *   4) 支持按价格 / 最新上架排序
+ *   5) 售罄与低库存标记，支持加入购物车
  */
 $pageTitle = '商品列表 · 鞋仓';
 require_once __DIR__ . '/config/db.php';
@@ -24,9 +26,18 @@ function batch_state($start, $end, $now)
     return 'over';                                          // 已结束
 }
 
-// ---- 搜索与分页参数（优化项）----
+// ---- 搜索 / 排序 / 分页参数 ----
 $keyword = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 if (mb_strlen($keyword) > 50) $keyword = mb_substr($keyword, 0, 50); // 限制搜索词长度
+
+$sort = isset($_GET['sort']) ? (string)$_GET['sort'] : 'newest';
+if (!in_array($sort, ['newest', 'price_asc', 'price_desc'], true)) $sort = 'newest';
+$orderBy = [
+    'newest'     => 'p.id DESC',
+    'price_asc'  => 'p.price ASC, p.id ASC',
+    'price_desc' => 'p.price DESC, p.id ASC',
+][$sort];
+
 $page   = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 if ($page < 1) $page = 1;
 $perPage = 6; // 每页商品数
@@ -73,7 +84,7 @@ if ($totalPages < 1) $totalPages = 1;
 if ($page > $totalPages) $page = $totalPages;
 $offset = ($page - 1) * $perPage; // $page/$perPage 均已转为 int，可安全内联
 
-// 5) 查询当前页在售商品
+// 5) 查询当前页在售商品（按排序规则）
 $onSaleProducts = [];
 if ($total > 0) {
     $stmt = $pdo->prepare(
@@ -82,12 +93,15 @@ if ($total > 0) {
          FROM products p
          JOIN batches b ON p.batch_id = b.id
          $whereSql
-         ORDER BY p.id ASC
+         ORDER BY $orderBy
          LIMIT $perPage OFFSET $offset"
     );
     $stmt->execute($params);
     $onSaleProducts = $stmt->fetchAll();
 }
+
+// 供搜索/分页回显的查询串
+$sortLabel = ['newest' => '最新上架', 'price_asc' => '价格从低到高', 'price_desc' => '价格从高到低'][$sort];
 ?>
 
 <!-- 页面小标题 -->
@@ -96,13 +110,18 @@ if ($total > 0) {
     <p>以下商品按批次、分时段上架，仅在上架时间段内展示。</p>
 </section>
 
-<!-- 搜索框 -->
+<!-- 搜索 + 排序 -->
 <section class="search-bar">
     <form action="index.php" method="get" class="search-form">
         <input type="search" name="q" value="<?php echo htmlspecialchars($keyword, ENT_QUOTES); ?>"
                placeholder="搜索鞋名或款式…" class="search-input">
+        <select name="sort" class="search-sort" onchange="this.form.submit()">
+            <option value="newest"     <?php echo $sort === 'newest'     ? 'selected' : ''; ?>>最新上架</option>
+            <option value="price_asc"  <?php echo $sort === 'price_asc'  ? 'selected' : ''; ?>>价格从低到高</option>
+            <option value="price_desc" <?php echo $sort === 'price_desc' ? 'selected' : ''; ?>>价格从高到低</option>
+        </select>
         <button type="submit" class="search-btn">搜索</button>
-        <?php if ($keyword !== ''): ?>
+        <?php if ($keyword !== '' || $sort !== 'newest'): ?>
             <a href="index.php" class="search-clear">清除</a>
         <?php endif; ?>
     </form>
@@ -151,7 +170,7 @@ if ($total > 0) {
         <?php if ($keyword !== ''): ?>
             搜索「<?php echo htmlspecialchars($keyword); ?>」的结果
         <?php else: ?>
-            当前在售鞋品
+            当前在售鞋品（<?php echo $sortLabel; ?>）
         <?php endif; ?>
     </h2>
     <?php if (empty($onSaleProducts)): ?>
@@ -162,7 +181,7 @@ if ($total > 0) {
         <div class="goods-grid">
         <?php foreach ($onSaleProducts as $p): ?>
             <div class="goods-card">
-                <a href="detail.php?id=<?php echo (int)$p['id']; ?>">
+                <a class="goods-link" href="detail.php?id=<?php echo (int)$p['id']; ?>">
                     <div class="goods-img">
                         <?php if ($p['image']): ?>
                             <img src="<?php echo htmlspecialchars($p['image']); ?>" alt="<?php echo htmlspecialchars($p['name']); ?>">
@@ -175,9 +194,25 @@ if ($total > 0) {
                         <h3 class="goods-name"><?php echo htmlspecialchars($p['name']); ?></h3>
                         <p class="goods-style">款式：<?php echo htmlspecialchars($p['style']); ?></p>
                         <p class="goods-price">¥<?php echo number_format($p['price'], 2); ?></p>
-                        <p class="goods-stock">库存：<?php echo (int)$p['stock']; ?> 双</p>
+                        <?php
+                            $stock = (int)$p['stock'];
+                            if ($stock <= 0) {
+                                echo '<p class="goods-stock out">已售罄</p>';
+                            } elseif ($stock <= 5) {
+                                echo '<p class="goods-stock low">仅剩 ' . $stock . ' 双</p>';
+                            } else {
+                                echo '<p class="goods-stock">库存：' . $stock . ' 双</p>';
+                            }
+                        ?>
                     </div>
                 </a>
+                <div class="goods-actions">
+                    <?php if ($stock > 0): ?>
+                        <a class="btn-add" href="cart.php?action=add&id=<?php echo (int)$p['id']; ?>">加入购物车</a>
+                    <?php else: ?>
+                        <span class="sold-out">已售罄</span>
+                    <?php endif; ?>
+                </div>
             </div>
         <?php endforeach; ?>
         </div>
@@ -186,7 +221,7 @@ if ($total > 0) {
         <?php if ($totalPages > 1): ?>
         <nav class="pagination">
             <?php
-                $query = $keyword !== '' ? '&q=' . urlencode($keyword) : '';
+                $query = ($keyword !== '' ? '&q=' . urlencode($keyword) : '') . '&sort=' . urlencode($sort);
                 if ($page > 1) {
                     echo '<a class="page-link" href="index.php?page=' . ($page - 1) . $query . '">上一页</a>';
                 }
