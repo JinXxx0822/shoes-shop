@@ -4,6 +4,7 @@
  * 功能：
  *   1) 展示所有批次及各自的上架状态（进行中 / 已结束 / 未开始）
  *   2) 仅展示「当前时间位于批次上架时间段内」的商品（分批、分时段上架）
+ *   3) 支持按名称/款式关键词搜索，并分页展示（优化项）
  */
 $pageTitle = '商品列表 · 鞋仓';
 require_once __DIR__ . '/config/db.php';
@@ -23,6 +24,13 @@ function batch_state($start, $end, $now)
     return 'over';                                          // 已结束
 }
 
+// ---- 搜索与分页参数（优化项）----
+$keyword = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+if (mb_strlen($keyword) > 50) $keyword = mb_substr($keyword, 0, 50); // 限制搜索词长度
+$page   = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+if ($page < 1) $page = 1;
+$perPage = 6; // 每页商品数
+
 // 1) 所有批次（含时间段、状态）
 $batches = $pdo->query(
     "SELECT id, batch_name, start_time, end_time, remark
@@ -39,19 +47,45 @@ $onSaleBatchIds = array_column(
     'id'
 );
 
-// 3) 当前正在上架的商品（JOIN 批次，过滤在售批次）
-$onSaleProducts = [];
+// 3) 构造在售商品的查询条件：批次过滤 + 关键词过滤
+$where  = [];
+$params = [];
 if ($onSaleBatchIds) {
     $placeholders = implode(',', array_fill(0, count($onSaleBatchIds), '?'));
+    $where[]  = "p.batch_id IN ($placeholders)";
+    $params   = array_values($onSaleBatchIds);
+}
+if ($keyword !== '') {
+    $where[] = "(p.name LIKE ? OR p.style LIKE ?)";
+    $like = '%' . $keyword . '%';
+    array_push($params, $like, $like);
+}
+$whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+
+// 4) 统计总数 + 计算分页
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*) FROM products p JOIN batches b ON p.batch_id = b.id $whereSql"
+);
+$countStmt->execute($params);
+$total      = (int)$countStmt->fetchColumn();
+$totalPages = (int)ceil($total / $perPage);
+if ($totalPages < 1) $totalPages = 1;
+if ($page > $totalPages) $page = $totalPages;
+$offset = ($page - 1) * $perPage; // $page/$perPage 均已转为 int，可安全内联
+
+// 5) 查询当前页在售商品
+$onSaleProducts = [];
+if ($total > 0) {
     $stmt = $pdo->prepare(
         "SELECT p.id, p.name, p.style, p.price, p.stock, p.image, p.description,
                 b.batch_name
          FROM products p
          JOIN batches b ON p.batch_id = b.id
-         WHERE p.batch_id IN ($placeholders)
-         ORDER BY p.id ASC"
+         $whereSql
+         ORDER BY p.id ASC
+         LIMIT $perPage OFFSET $offset"
     );
-    $stmt->execute(array_values($onSaleBatchIds));
+    $stmt->execute($params);
     $onSaleProducts = $stmt->fetchAll();
 }
 ?>
@@ -60,6 +94,18 @@ if ($onSaleBatchIds) {
 <section class="page-head">
     <h1>鞋品上新</h1>
     <p>以下商品按批次、分时段上架，仅在上架时间段内展示。</p>
+</section>
+
+<!-- 搜索框 -->
+<section class="search-bar">
+    <form action="index.php" method="get" class="search-form">
+        <input type="search" name="q" value="<?php echo htmlspecialchars($keyword, ENT_QUOTES); ?>"
+               placeholder="搜索鞋名或款式…" class="search-input">
+        <button type="submit" class="search-btn">搜索</button>
+        <?php if ($keyword !== ''): ?>
+            <a href="index.php" class="search-clear">清除</a>
+        <?php endif; ?>
+    </form>
 </section>
 
 <!-- 批次状态总览 -->
@@ -101,9 +147,17 @@ if ($onSaleBatchIds) {
 
 <!-- 正在上架商品 -->
 <section class="goods-panel">
-    <h2>当前在售鞋品</h2>
+    <h2>
+        <?php if ($keyword !== ''): ?>
+            搜索「<?php echo htmlspecialchars($keyword); ?>」的结果
+        <?php else: ?>
+            当前在售鞋品
+        <?php endif; ?>
+    </h2>
     <?php if (empty($onSaleProducts)): ?>
-        <p class="empty-text">当前没有处于上架时间段的商品，请稍后再来。</p>
+        <p class="empty-text">
+            <?php echo $keyword !== '' ? '没有匹配到在售商品，换个关键词试试。' : '当前没有处于上架时间段的商品，请稍后再来。'; ?>
+        </p>
     <?php else: ?>
         <div class="goods-grid">
         <?php foreach ($onSaleProducts as $p): ?>
@@ -127,6 +181,22 @@ if ($onSaleBatchIds) {
             </div>
         <?php endforeach; ?>
         </div>
+
+        <!-- 分页导航 -->
+        <?php if ($totalPages > 1): ?>
+        <nav class="pagination">
+            <?php
+                $query = $keyword !== '' ? '&q=' . urlencode($keyword) : '';
+                if ($page > 1) {
+                    echo '<a class="page-link" href="index.php?page=' . ($page - 1) . $query . '">上一页</a>';
+                }
+                echo '<span class="page-info">第 ' . $page . ' / ' . $totalPages . ' 页（共 ' . $total . ' 件）</span>';
+                if ($page < $totalPages) {
+                    echo '<a class="page-link" href="index.php?page=' . ($page + 1) . $query . '">下一页</a>';
+                }
+            ?>
+        </nav>
+        <?php endif; ?>
     <?php endif; ?>
 </section>
 

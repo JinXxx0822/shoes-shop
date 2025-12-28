@@ -170,3 +170,38 @@ img { max-width: 100%; display: block; }
     .detail-box { grid-template-columns: 1fr; }
     .clock { display: none; }
 }
+
+/* ---------------- 搜索框 ---------------- */
+.search-bar {
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 20px;
+    margin: 16px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+.search-form { display: flex; gap: 10px; align-items: center; }
+.search-input {
+    flex: 1; max-width: 420px;
+    padding: 9px 12px;
+    border: 1px solid #ddd; border-radius: 6px;
+    font-size: 14px;
+}
+.search-input:focus { outline: none; border-color: #3d5a80; }
+.search-btn {
+    background: #3d5a80; color: #fff; border: none;
+    padding: 9px 22px; border-radius: 6px; cursor: pointer;
+}
+.search-btn:hover { background: #2b3a67; }
+.search-clear { color: #888; font-size: 13px; }
+
+/* ---------------- 分页 ---------------- */
+.pagination {
+    display: flex; justify-content: center; align-items: center; gap: 12px;
+    margin-top: 20px;
+}
+.page-link {
+    background: #3d5a80; color: #fff;
+    padding: 6px 16px; border-radius: 6px; font-size: 14px;
+}
+.page-link:hover { background: #2b3a67; }
+.page-info { color: #666; font-size: 13px; }
